@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -137,7 +137,7 @@ fun NpuCard(npu: NpuInfo?, snapshot: Snapshot?, history: List<Float>) {
                     modifier = Modifier.weight(1f),
                 )
                 Icon(
-                    imageVector = Icons.Filled.ExpandMore,
+                    imageVector = Icons.Filled.KeyboardArrowDown,
                     contentDescription = null,
                     modifier = Modifier
                         .size(18.dp)

@@ -15,7 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -101,7 +101,7 @@ fun DashboardScreen(
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
                             Icon(
-                                imageVector = Icons.Filled.ExpandMore,
+                                imageVector = Icons.Filled.KeyboardArrowDown,
                                 contentDescription = null,
                                 modifier = Modifier
                                     .padding(start = 2.dp)

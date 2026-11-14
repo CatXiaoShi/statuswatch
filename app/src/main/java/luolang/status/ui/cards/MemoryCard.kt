@@ -15,9 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -119,7 +118,7 @@ fun MemoryCard(mem: MemoryInfo?, history: List<Float>) {
                     modifier = Modifier.weight(1f),
                 )
                 Icon(
-                    imageVector = Icons.Filled.ExpandMore,
+                    imageVector = Icons.Filled.KeyboardArrowDown,
                     contentDescription = "展开/收起",
                     modifier = Modifier
                         .size(20.dp)
@@ -233,7 +232,7 @@ private fun SwapIoDetail(mem: MemoryInfo) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                imageVector = Icons.Filled.ArrowUpward,
+                imageVector = Icons.Filled.KeyboardArrowUp,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(16.dp),
@@ -246,7 +245,7 @@ private fun SwapIoDetail(mem: MemoryInfo) {
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                imageVector = Icons.Filled.ArrowDownward,
+                imageVector = Icons.Filled.KeyboardArrowDown,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.tertiary,
                 modifier = Modifier.size(16.dp),

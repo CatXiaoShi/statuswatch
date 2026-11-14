@@ -97,11 +97,15 @@
 ```bash
 git clone <your-repo-url>
 cd watch
-./build.sh              # 编译并安装
+./build.sh              # 编译 release（R8 压缩，约 2 MB）并安装
 ./build.sh --no-install # 只编译
+./build.sh --debug      # 编译 debug（速度快，体积大，含 Compose 工具）
 ```
 
-产物：`app/build/outputs/apk/debug/app-debug.apk`
+release 产物：`app/build/outputs/apk/release/app-release.apk`
+debug 产物：`app/build/outputs/apk/debug/app-debug.apk`
+
+> release 包体积小是因为开启了 R8 代码压缩 + 资源裁剪；debug 包不做压缩，并且包含 `ui-tooling`，体积会大很多。
 
 ## 数据来源
 

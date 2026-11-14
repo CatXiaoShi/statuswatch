@@ -227,7 +227,15 @@ class SystemMonitor {
               [ -r "${'$'}K/temp" ] && { read -r g < "${'$'}K/temp"; echo "GPUTEMP=${'$'}g"; }
               [ -r "${'$'}K/gpu_model" ] && { read -r g < "${'$'}K/gpu_model"; echo "GPUMODEL=${'$'}g"; }
             fi
-            DBG=${'$'}(awk '${'$'}3=="debugfs"{print ${'$'}2; exit}' /proc/self/mounts 2>/dev/null)
+            DBG=""
+            for d in ${'$'}(awk '${'$'}3=="debugfs"{print ${'$'}2}' /proc/self/mounts 2>/dev/null); do
+              [ -f "${'$'}d/sysmon_subsystem_stats/master_cdsp_stats" ] && { DBG="${'$'}d"; break; }
+            done
+            if [ -z "${'$'}DBG" ]; then
+              mkdir -p /sys/kernel/debug 2>/dev/null
+              mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null
+              [ -f /sys/kernel/debug/sysmon_subsystem_stats/master_cdsp_stats ] && DBG=/sys/kernel/debug
+            fi
             STAT="${'$'}DBG/sysmon_subsystem_stats/master_cdsp_stats"
             if [ -n "${'$'}DBG" ] && [ -f "${'$'}STAT" ]; then
               awk '

@@ -28,7 +28,7 @@
 ## 界面预览
 
 <p align="center">
-  <img src="docs/screenshot-v1.1.0.jpg" width="360" alt="洛水流汐主界面" />
+  <img src="docs/IMG_20261115_141422.jpg" width="360" alt="洛水流汐主界面" />
 </p>
 
 ## 功能特性

@@ -9,7 +9,59 @@ data class DeviceInfo(
     val gpu: String,
     val opengl: String,
     val kernel: String,
+    val diskModel: String = "",
+    val diskVendor: String = "",
+    val ramModel: String = "",
+    val ramVendor: String = "",
+    val ramType: String = "",
 )
+
+/** 功耗计算设置（不同设备单位/方向不一致，允许手动校准）。 */
+data class PowerSettings(
+    val unit: String = "auto",   // auto / ua / ma
+    val invert: Boolean = false,
+    val scale: Float = 1.0f,
+)
+
+/** /proc/diskstats 的原始累计值。 */
+data class DiskStatRaw(
+    val reads: Long,
+    val sectorsRead: Long,
+    val writes: Long,
+    val sectorsWritten: Long,
+    val inflight: Int,
+    val ioTicks: Long,
+)
+
+/** 磁盘 / 存储。 */
+data class DiskInfo(
+    val available: Boolean = false,
+    val device: String = "",
+    val fsType: String = "",
+    val readBps: Double = 0.0,
+    val writeBps: Double = 0.0,
+    val readIops: Double = 0.0,
+    val writeIops: Double = 0.0,
+    val busyPct: Double = 0.0,
+    val inflight: Int = 0,
+    val totalBytes: Long = 0,
+    val freeBytes: Long = 0,
+    /** UFS life_time_estimation_a 原始值（0x01..0x0B），-1 表示不可用。 */
+    val life: Int = -1,
+    /** UFS eol_info：1 正常 / 2 警告 / 3 紧急，-1 表示不可用。 */
+    val eol: Int = -1,
+    /** 本次开机写入量（字节，部分厂商提供）。 */
+    val sessionWriteBytes: Long = 0,
+    /** 本次开机读取量（字节，部分厂商提供）。 */
+    val sessionReadBytes: Long = 0,
+    val raw: DiskStatRaw? = null,
+) {
+    val usedBytes: Long get() = (totalBytes - freeBytes).coerceAtLeast(0)
+    val usedPct: Float get() = if (totalBytes > 0) usedBytes.toFloat() / totalBytes * 100f else 0f
+    /** 由 life_time_estimation 估计的损耗区间上限（%）。 */
+    val wearPct: Int get() = if (life in 1..11) (life - 1) * 10 else -1
+}
+
 
 /**
  * 单个 CPU 核心的当前频率与最高频率（单位 kHz）。
@@ -130,6 +182,7 @@ data class Snapshot(
     val mem: MemoryInfo,
     val npu: NpuInfo,
     val gpu: GpuInfo = GpuInfo(),
+    val disk: DiskInfo = DiskInfo(),
     val battery: BatteryInfo,
     val thermalZones: List<ThermalZone>,
     val uptimeSec: Long,
@@ -145,7 +198,8 @@ data class Snapshot(
             ?: valid.firstOrNull {
                 val t = it.type.lowercase()
                 t.contains("soc") || t.contains("cpu") || t.contains("tsens") ||
-                    t.contains("mtkts") || t.contains("quiet")
+                    t.contains("mtkts") || t.contains("quiet") ||
+                    t.contains("tj") || t.contains("soc_thermal")
             }
             ?: valid.firstOrNull()
         return key?.let { it.tempMillis / 1000f }
@@ -156,6 +210,16 @@ data class Snapshot(
         if (gpu.tempMillis > 0) return gpu.tempMillis / 1000f
         val key = thermalZones.filter { it.tempMillis > 0 }
             .firstOrNull { it.type.lowercase().contains("gpuss") || it.type.lowercase().contains("gpu") }
+        return key?.let { it.tempMillis / 1000f }
+    }
+
+    /** 存储温度（°C）：查找 ufs / emmc / storage 类热区。 */
+    fun diskTempC(): Float? {
+        val key = thermalZones.filter { it.tempMillis > 0 }.firstOrNull {
+            val t = it.type.lowercase()
+            t.contains("ufs") || t.contains("emmc") || t.contains("storage") ||
+                t.contains("nvme") || t.contains("mmc")
+        }
         return key?.let { it.tempMillis / 1000f }
     }
 

@@ -35,6 +35,8 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import luolang.status.data.BrandNames
+import luolang.status.data.DeviceInfo
 import luolang.status.data.MemoryInfo
 import luolang.status.ui.components.Sparkline
 import luolang.status.ui.formatBytes
@@ -43,8 +45,18 @@ import luolang.status.ui.pagesToBytes
 import java.util.Locale
 
 @Composable
-fun MemoryCard(mem: MemoryInfo?, history: List<Float>) {
+fun MemoryCard(mem: MemoryInfo?, history: List<Float>, device: DeviceInfo? = null) {
     var expanded by remember { mutableStateOf(false) }
+    val ramBrand = BrandNames.display(device?.ramVendor ?: "")
+    val ramModel = device?.ramModel?.trim().orEmpty()
+    val ramType = device?.ramType?.trim().orEmpty()
+    val ramLabel = when {
+        ramBrand != "未知" && ramModel.isNotEmpty() &&
+            !ramBrand.contains(ramModel, ignoreCase = true) -> "$ramBrand $ramModel"
+        ramBrand != "未知" -> ramBrand
+        ramModel.isNotEmpty() -> ramModel
+        else -> "型号未暴露"
+    }
 
     Card(
         shape = RoundedCornerShape(26.dp),
@@ -79,7 +91,25 @@ fun MemoryCard(mem: MemoryInfo?, history: List<Float>) {
                 )
             }
 
-            Spacer(Modifier.height(14.dp))
+            Text(
+                text = buildString {
+                    append("内存 · ")
+                    append(ramLabel)
+                    if (ramType.isNotEmpty() && ramLabel != "型号未暴露") {
+                        append(" · ")
+                        append(ramType)
+                    }
+                    if (mem != null) {
+                        append(" · ")
+                        append(formatKb(mem.totalKb))
+                    }
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+
+            Spacer(Modifier.height(10.dp))
 
             // 物理内存 / 交换进度条
             if (mem != null) {

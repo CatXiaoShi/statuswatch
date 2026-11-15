@@ -4,10 +4,13 @@ import luolang.status.data.BatteryInfo
 import luolang.status.data.CpuCore
 import luolang.status.data.CpuPolicy
 import luolang.status.data.CpuStat
+import luolang.status.data.DiskInfo
+import luolang.status.data.DiskStatRaw
 import luolang.status.data.GpuInfo
 import luolang.status.data.MemoryInfo
 import luolang.status.data.NetInfo
 import luolang.status.data.NpuInfo
+import luolang.status.data.PowerSettings
 import luolang.status.data.Snapshot
 import luolang.status.data.ThermalZone
 
@@ -22,6 +25,8 @@ object ShellParser {
         output: String,
         prevCpu: CpuStat?,
         prevCores: Map<Int, CpuStat> = emptyMap(),
+        prevDisk: DiskStatRaw? = null,
+        power: PowerSettings = PowerSettings(),
         prevNetRx: Long,
         prevNetTx: Long,
         prevTimeMs: Long,
@@ -40,6 +45,16 @@ object ShellParser {
         var load15 = 0.0
         var procsRunning = 0
         var procsBlocked = 0
+
+        var diskRaw: DiskStatRaw? = null
+        var diskDevice = ""
+        var diskFs = ""
+        var diskTotalBytes = 0L
+        var diskFreeBytes = 0L
+        var diskLife = -1
+        var diskEol = -1
+        var diskSessionWriteMb = 0L
+        var diskSessionReadMb = 0L
 
         var gpuBusyPct = 0.0
         var gpuBusyRaw = ""
@@ -141,6 +156,32 @@ object ShellParser {
                 key == "GPUGOV" -> gpuGov = value
                 key == "GPUTEMP" -> gpuTemp = value.toLongOrNull() ?: 0
                 key == "GPUMODEL" -> gpuModel = value
+                key == "DATA" -> diskDevice = value
+                key == "FSTYPE" -> diskFs = value
+                key == "DSK" -> {
+                    val p = value.split(Regex("\\s+")).mapNotNull { it.toLongOrNull() }
+                    if (p.size >= 6) {
+                        diskRaw = DiskStatRaw(
+                            reads = p[0],
+                            sectorsRead = p[1],
+                            writes = p[2],
+                            sectorsWritten = p[3],
+                            inflight = p[4].toInt(),
+                            ioTicks = p[5],
+                        )
+                    }
+                }
+                key == "STATF" -> {
+                    val p = value.split(Regex("\\s+")).mapNotNull { it.toLongOrNull() }
+                    if (p.size >= 3 && p[2] > 0) {
+                        diskTotalBytes = p[0] * p[2]
+                        diskFreeBytes = p[1] * p[2]
+                    }
+                }
+                key == "UFSWRITEMB" -> diskSessionWriteMb = value.toLongOrNull() ?: 0
+                key == "UFSREADMB" -> diskSessionReadMb = value.toLongOrNull() ?: 0
+                key == "UFSLIFE" -> diskLife = parseHex(value)
+                key == "UFSEOL" -> diskEol = parseHex(value)
                 key == "MEM" -> {
                     val parts = value.split(Regex("\\s+")).mapNotNull { it.toLongOrNull() }
                     if (parts.size >= 5) {
@@ -156,6 +197,7 @@ object ShellParser {
                 key == "PSWPIN" -> pswpin = value.toLongOrNull() ?: 0
                 key == "PSWPOUT" -> pswpout = value.toLongOrNull() ?: 0
                 key == "NPU_HMX" -> { hmx = value.toDoubleOrNull() ?: 0.0; npuAvailable = true }
+                key == "NPU_AVAIL" -> if (value == "1") npuAvailable = true
                 key == "NPU_HVX" -> hvx = value.toDoubleOrNull() ?: 0.0
                 key == "NPU_Q6" -> q6 = value.toDoubleOrNull() ?: 0.0
                 key == "NPU_CLK" -> npuClk = value.toLongOrNull() ?: 0
@@ -217,6 +259,27 @@ object ShellParser {
             }.coerceIn(0.0, 100.0)
         }
 
+        // 磁盘：扇区增量 × 512 → 字节；完成次数增量 → IOPS；io_ticks 增量 → 繁忙度
+        val curDisk = diskRaw
+        val diskDt = (nowMs - prevTimeMs).coerceAtLeast(1) / 1000.0
+        var diskReadBps = 0.0
+        var diskWriteBps = 0.0
+        var diskReadIops = 0.0
+        var diskWriteIops = 0.0
+        var diskBusy = 0.0
+        if (curDisk != null && prevDisk != null && diskDt > 0) {
+            val dReadSectors = (curDisk.sectorsRead - prevDisk.sectorsRead).coerceAtLeast(0)
+            val dWriteSectors = (curDisk.sectorsWritten - prevDisk.sectorsWritten).coerceAtLeast(0)
+            val dReads = (curDisk.reads - prevDisk.reads).coerceAtLeast(0)
+            val dWrites = (curDisk.writes - prevDisk.writes).coerceAtLeast(0)
+            val dIoTicks = (curDisk.ioTicks - prevDisk.ioTicks).coerceAtLeast(0)
+            diskReadBps = dReadSectors * 512.0 / diskDt
+            diskWriteBps = dWriteSectors * 512.0 / diskDt
+            diskReadIops = dReads / diskDt
+            diskWriteIops = dWrites / diskDt
+            diskBusy = (dIoTicks / (diskDt * 1000.0) * 100.0).coerceIn(0.0, 100.0)
+        }
+
         return Snapshot(
             cpuUsagePct = cpuUsage,
             cores = sortedCores.map { c -> c.copy(maxKhz = maxFreqs[c.index] ?: c.maxKhz) },
@@ -263,10 +326,28 @@ object ShellParser {
                 tempMillis = gpuTemp,
                 model = gpuModel,
             ),
+            disk = DiskInfo(
+                available = curDisk != null,
+                device = diskDevice,
+                fsType = diskFs,
+                readBps = diskReadBps,
+                writeBps = diskWriteBps,
+                readIops = diskReadIops,
+                writeIops = diskWriteIops,
+                busyPct = diskBusy,
+                inflight = curDisk?.inflight ?: 0,
+                totalBytes = diskTotalBytes,
+                freeBytes = diskFreeBytes,
+                life = diskLife,
+                eol = diskEol,
+                sessionWriteBytes = diskSessionWriteMb * 1024L * 1024L,
+                sessionReadBytes = diskSessionReadMb * 1024L * 1024L,
+                raw = curDisk,
+            ),
             battery = BatteryInfo(
                 capacityPct = battCap,
                 tempMillis = battTemp,
-                powerW = computePowerW(batPowerUw, batVoltUv, batCur, batStatus),
+                powerW = computePowerW(batPowerUw, batVoltUv, batCur, batStatus, power),
                 charging = isCharging(batStatus),
             ),
             thermalZones = thermals,
@@ -289,10 +370,19 @@ object ShellParser {
      * 厂商单位不统一：多数设备 current_now 是 µA，OPPO/一加等部分机型是 mA，
      * 因此两种解释都算一遍，取落在合理功耗区间 (0.02W ~ 25W) 的那个。
      */
-    private fun computePowerW(powerUw: Long, voltUv: Long, cur: Long, status: String): Double {
-        val sign = if (isCharging(status)) 1.0 else -1.0
+    private fun computePowerW(
+        powerUw: Long,
+        voltUv: Long,
+        cur: Long,
+        status: String,
+        settings: PowerSettings,
+    ): Double {
+        val charging = isCharging(status)
+        val sign = if (charging != settings.invert) 1.0 else -1.0
+        val scale = settings.scale.coerceIn(0.1f, 5.0f).toDouble()
+
         if (powerUw > 0) {
-            return sign * powerUw / 1_000_000.0
+            return sign * powerUw / 1_000_000.0 * scale
         }
         if (voltUv <= 0 || cur == 0L) return 0.0
         val volt = voltUv / 1_000_000.0
@@ -300,13 +390,25 @@ object ShellParser {
 
         val asMicroAmp = c / 1_000_000.0 * volt
         val asMilliAmp = c / 1_000.0 * volt
-        val watt = when {
-            asMicroAmp in 0.02..25.0 -> asMicroAmp
-            asMilliAmp in 0.02..25.0 -> asMilliAmp
-            else -> asMicroAmp
+        val watt = when (settings.unit) {
+            "ua" -> asMicroAmp
+            "ma" -> asMilliAmp
+            else -> when {
+                asMicroAmp in 0.02..25.0 -> asMicroAmp
+                asMilliAmp in 0.02..25.0 -> asMilliAmp
+                else -> asMicroAmp
+            }
         }
-        return sign * watt
+        return sign * watt * scale
     }
+
+    /** 解析 "0x01" 或 "1" 形式的十六进制/十进制整数。 */
+    private fun parseHex(value: String): Int {
+        val v = value.trim()
+        val hex = v.removePrefix("0x").removePrefix("0X")
+        return hex.toIntOrNull(16) ?: v.toIntOrNull() ?: -1
+    }
+
 
     private fun parseCpuStat(value: String): CpuStat? {
         val p = value.split(Regex("\\s+")).mapNotNull { it.toLongOrNull() }

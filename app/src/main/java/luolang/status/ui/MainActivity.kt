@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import luolang.status.data.PowerSettings
 import luolang.status.monitor.RootManager
 import luolang.status.monitor.SystemMonitor
 import kotlinx.coroutines.delay
@@ -33,6 +34,20 @@ class MainActivity : ComponentActivity() {
                 // 采样间隔（0.1s ~ 5s），持久化
                 var intervalMs by remember {
                     mutableStateOf(prefs.getInt(KEY_INTERVAL, 1000))
+                }
+
+                // 功耗校准设置，持久化
+                var powerSettings by remember {
+                    mutableStateOf(
+                        PowerSettings(
+                            unit = prefs.getString(KEY_POWER_UNIT, "auto") ?: "auto",
+                            invert = prefs.getBoolean(KEY_POWER_INVERT, false),
+                            scale = prefs.getFloat(KEY_POWER_SCALE, 1.0f),
+                        ),
+                    )
+                }
+                androidx.compose.runtime.SideEffect {
+                    monitor.powerSettings = powerSettings
                 }
 
                 // 首次启动做 root 检测
@@ -78,6 +93,15 @@ class MainActivity : ComponentActivity() {
                                 intervalMs = ms
                                 prefs.edit().putInt(KEY_INTERVAL, ms).apply()
                             },
+                            powerSettings = powerSettings,
+                            onPowerSettingsChange = { ps ->
+                                powerSettings = ps
+                                prefs.edit()
+                                    .putString(KEY_POWER_UNIT, ps.unit)
+                                    .putBoolean(KEY_POWER_INVERT, ps.invert)
+                                    .putFloat(KEY_POWER_SCALE, ps.scale)
+                                    .apply()
+                            },
                         )
                     }
                 }
@@ -87,5 +111,8 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val KEY_INTERVAL = "sample_interval_ms"
+        const val KEY_POWER_UNIT = "power_unit"
+        const val KEY_POWER_INVERT = "power_invert"
+        const val KEY_POWER_SCALE = "power_scale"
     }
 }

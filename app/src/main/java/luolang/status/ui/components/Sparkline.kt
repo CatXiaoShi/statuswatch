@@ -89,6 +89,70 @@ fun Sparkline(
     }
 }
 
+/**
+ * 双线趋势图：读 / 写两条曲线，共用同一纵轴。
+ */
+@Composable
+fun DualSparkline(
+    readValues: List<Float>,
+    writeValues: List<Float>,
+    readColor: Color,
+    writeColor: Color,
+    modifier: Modifier = Modifier,
+    maxValue: Float = 0f,
+) {
+    Canvas(modifier = modifier) {
+        val n = maxOf(readValues.size, writeValues.size)
+        if (n == 0) return@Canvas
+        val max = maxValue.coerceAtLeast(
+            (readValues + writeValues).maxOrNull()?.coerceAtLeast(1f) ?: 1f
+        )
+        val stepX = if (n == 1) 0f else size.width / (n - 1).toFloat()
+        fun pointsOf(values: List<Float>): List<Offset> {
+            val offset = n - values.size
+            return values.mapIndexed { i, v ->
+                Offset((i + offset) * stepX, (1f - (v / max).coerceIn(0f, 1f)) * size.height)
+            }
+        }
+
+        val readPts = pointsOf(readValues)
+        if (readPts.size >= 2) {
+            val line = smoothPath(readPts)
+            val fill = Path().apply {
+                addPath(line)
+                lineTo(readPts.last().x, size.height)
+                lineTo(readPts.first().x, size.height)
+                close()
+            }
+            drawPath(
+                path = fill,
+                brush = Brush.verticalGradient(
+                    colors = listOf(readColor.copy(alpha = 0.18f), readColor.copy(alpha = 0f)),
+                    startY = 0f,
+                    endY = size.height,
+                ),
+            )
+            drawPath(
+                path = line,
+                color = readColor,
+                style = Stroke(width = 4f, cap = StrokeCap.Round, join = StrokeJoin.Round),
+            )
+        }
+
+        val writePts = pointsOf(writeValues)
+        if (writePts.size >= 2) {
+            drawPath(
+                path = smoothPath(writePts),
+                color = writeColor,
+                style = Stroke(width = 4f, cap = StrokeCap.Round, join = StrokeJoin.Round),
+            )
+        }
+
+        readPts.lastOrNull()?.let { drawCircle(color = readColor, radius = 3.5f, center = it) }
+        writePts.lastOrNull()?.let { drawCircle(color = writeColor, radius = 3.5f, center = it) }
+    }
+}
+
 /** Catmull-Rom 转三次贝塞尔，得到柔滑曲线。 */
 private fun smoothPath(points: List<Offset>): Path {
     val path = Path()

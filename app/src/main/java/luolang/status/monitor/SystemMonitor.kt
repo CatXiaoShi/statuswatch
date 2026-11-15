@@ -5,6 +5,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import luolang.status.data.DeviceInfo
+import luolang.status.data.DiskStatRaw
+import luolang.status.data.PowerSettings
 import luolang.status.data.Snapshot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -22,11 +24,16 @@ class SystemMonitor {
         val memHistory: List<Float> = emptyList(),
         val npuHistory: List<Float> = emptyList(),
         val gpuHistory: List<Float> = emptyList(),
+        val diskReadHistory: List<Float> = emptyList(),
+        val diskWriteHistory: List<Float> = emptyList(),
         val powerHistory: List<Float> = emptyList(),
     )
 
     var state by mutableStateOf(State())
         private set
+
+    /** 功耗校准设置，由界面写入。 */
+    var powerSettings: PowerSettings = PowerSettings()
 
     /** 注入启动时读到的静态设备信息。 */
     fun applyDevice(device: DeviceInfo) {
@@ -35,6 +42,7 @@ class SystemMonitor {
 
     private var prevCpu: luolang.status.data.CpuStat? = null
     private var prevCores: Map<Int, luolang.status.data.CpuStat> = emptyMap()
+    private var prevDisk: DiskStatRaw? = null
     private var prevNetRx = -1L
     private var prevNetTx = -1L
     private var prevTimeMs = 0L
@@ -46,6 +54,12 @@ class SystemMonitor {
         var hardware = ""
         var gpuProp = ""
         var glesLine = ""
+        var diskModel = ""
+        var diskVendor = ""
+        var ramModel = ""
+        var ramVendor = ""
+        var ramType = ""
+        var ramInfo = ""
         for (raw in out.lineSequence()) {
             val line = raw.trim()
             val eq = line.indexOf('=')
@@ -57,6 +71,23 @@ class SystemMonitor {
                 "HW" -> hardware = value
                 "GPU" -> gpuProp = value
                 "GLES" -> if (value.isNotEmpty()) glesLine = value
+                "DISKMODEL" -> diskModel = value
+                "DISKVENDOR" -> diskVendor = value
+                "RAMMODEL" -> ramModel = value
+                "RAMVENDOR" -> ramVendor = value
+                "RAMTYPE" -> ramType = value
+                "RAMINFO" -> ramInfo = value
+            }
+        }
+
+        // /proc/devinfo/ddr 格式：Device manufacture: Samsung|D1b|16G
+        if (ramInfo.isNotEmpty()) {
+            val parts = ramInfo.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+            if (parts.size >= 2) {
+                ramVendor = parts[0]
+                ramModel = parts.drop(1).joinToString(" ")
+            } else if (parts.size == 1) {
+                ramVendor = parts[0]
             }
         }
 
@@ -78,6 +109,11 @@ class SystemMonitor {
             gpu = gpu,
             opengl = opengl,
             kernel = System.getProperty("os.version") ?: "unknown",
+            diskModel = diskModel.trim(),
+            diskVendor = diskVendor.trim(),
+            ramModel = ramModel.trim(),
+            ramVendor = ramVendor.trim(),
+            ramType = ramType.trim(),
         )
     }
 
@@ -100,6 +136,8 @@ class SystemMonitor {
             output = out,
             prevCpu = prevCpu,
             prevCores = prevCores,
+            prevDisk = prevDisk,
+            power = powerSettings,
             prevNetRx = prevNetRx,
             prevNetTx = prevNetTx,
             prevTimeMs = prevTimeMs,
@@ -108,6 +146,7 @@ class SystemMonitor {
 
         prevCpu = snap.cpuStat
         prevCores = snap.coreStats
+        prevDisk = snap.disk.raw
         prevNetRx = snap.net.rxBytes
         prevNetTx = snap.net.txBytes
         prevTimeMs = nowMs
@@ -116,6 +155,8 @@ class SystemMonitor {
         val memHist = append(state.memHistory, snap.mem.ramPct)
         val npuHist = append(state.npuHistory, snap.npu.hmxPct.toFloat())
         val gpuHist = append(state.gpuHistory, snap.gpu.loadPct.toFloat())
+        val diskReadHist = append(state.diskReadHistory, (snap.disk.readBps / 1048576.0).toFloat())
+        val diskWriteHist = append(state.diskWriteHistory, (snap.disk.writeBps / 1048576.0).toFloat())
         val powerHist = append(
             state.powerHistory,
             kotlin.math.abs(snap.battery.powerW).toFloat(),
@@ -128,6 +169,8 @@ class SystemMonitor {
             memHistory = memHist,
             npuHistory = npuHist,
             gpuHistory = gpuHist,
+            diskReadHistory = diskReadHist,
+            diskWriteHistory = diskWriteHist,
             powerHistory = powerHist,
         )
     }
@@ -151,6 +194,47 @@ class SystemMonitor {
             echo "GPU=${'$'}GPU"
             GLES=${'$'}(dumpsys SurfaceFlinger 2>/dev/null | grep -E '^GLES:' | head -n 1)
             echo "GLES=${'$'}GLES"
+            DISKMODEL=""; DISKVENDOR=""
+            for b in /sys/block/sd* /sys/block/mmcblk* /sys/block/nvme*; do
+              [ -d "${'$'}b" ] || continue
+              if [ -f "${'$'}b/device/model" ]; then
+                DISKMODEL=${'$'}(cat "${'$'}b/device/model" 2>/dev/null | tr -d '\n')
+                DISKVENDOR=${'$'}(cat "${'$'}b/device/vendor" 2>/dev/null | tr -d '\n')
+                break
+              fi
+            done
+            if [ -z "${'$'}DISKMODEL" ] && [ -f /proc/devinfo/ufs ]; then
+              DISKMODEL=${'$'}(sed -n 's/^Device version:[[:space:]]*//p' /proc/devinfo/ufs 2>/dev/null | head -n 1 | sed 's/[[:space:]]*$//')
+              DISKVENDOR=${'$'}(sed -n 's/^Device manufacture:[[:space:]]*//p' /proc/devinfo/ufs 2>/dev/null | head -n 1 | sed 's/[[:space:]]*$//')
+            fi
+            if [ -z "${'$'}DISKMODEL" ] && [ -f /proc/scsi/scsi ]; then
+              DISKVENDOR=${'$'}(awk '/Vendor:/{print ${'$'}2; exit}' /proc/scsi/scsi 2>/dev/null)
+              DISKMODEL=${'$'}(awk '/Model:/{print ${'$'}2; exit}' /proc/scsi/scsi 2>/dev/null)
+            fi
+            if [ -z "${'$'}DISKMODEL" ] && [ -f /proc/hwinfo ]; then
+              DISKLINE=${'$'}(grep -i -E 'ufs|flash|emmc' /proc/hwinfo 2>/dev/null | head -n 1)
+              [ -n "${'$'}DISKLINE" ] && DISKMODEL="${'$'}DISKLINE"
+            fi
+            if [ -z "${'$'}DISKMODEL" ]; then
+              DISKLINE=${'$'}(dmesg 2>/dev/null | grep -i -E 'ufs.*(model|vendor)|ufs_device_info' | head -n 1)
+              [ -n "${'$'}DISKLINE" ] && DISKMODEL="${'$'}DISKLINE"
+            fi
+            echo "DISKMODEL=${'$'}DISKMODEL"
+            echo "DISKVENDOR=${'$'}DISKVENDOR"
+            DDRINFO=${'$'}(cat /proc/devinfo/ddr 2>/dev/null)
+            RAMTYPE=${'$'}(printf '%s\n' "${'$'}DDRINFO" | sed -n 's/^Device version:[[:space:]]*//p' | head -n 1 | sed 's/[[:space:]]*$//')
+            RAMINFO=${'$'}(printf '%s\n' "${'$'}DDRINFO" | sed -n 's/^Device manufacture:[[:space:]]*//p' | head -n 1 | sed 's/[[:space:]]*$//')
+            if [ -z "${'$'}RAMINFO" ] && [ -f /proc/hwinfo ]; then
+              RAMINFO=${'$'}(grep -i -E 'ddr|dram' /proc/hwinfo 2>/dev/null | head -n 1)
+            fi
+            if [ -z "${'$'}RAMINFO" ]; then
+              RAMINFO=${'$'}(dmesg 2>/dev/null | grep -i -E 'ddr[ _-](manufacturer|part|type)|\bdram\b' | head -n 1)
+            fi
+            [ -z "${'$'}RAMINFO" ] && RAMINFO=${'$'}(getprop ro.boot.ddr_manufacturer 2>/dev/null)
+            echo "RAMTYPE=${'$'}RAMTYPE"
+            echo "RAMINFO=${'$'}RAMINFO"
+            echo "RAMVENDOR=${'$'}(getprop ro.boot.ddr_vendor 2>/dev/null)"
+            echo "RAMMODEL=${'$'}(getprop ro.boot.ddr_part 2>/dev/null)"
         """.trimIndent()
 
         /**
@@ -216,8 +300,25 @@ class SystemMonitor {
             [ -f /sys/class/power_supply/battery/current_now ] && { read -r c < /sys/class/power_supply/battery/current_now; echo "BATCUR=${'$'}c"; }
             [ -f /sys/class/power_supply/battery/status ] && { read -r c < /sys/class/power_supply/battery/status; echo "BATSTAT=${'$'}c"; }
             { read -r u _ < /proc/uptime; echo "UPTIME=${'$'}{u%.*}"; }
+            DATA=${'$'}(awk '${'$'}2=="/data"{print ${'$'}1}' /proc/mounts 2>/dev/null | sed 's#.*/##')
+            echo "DATA=${'$'}DATA"
+            if [ -n "${'$'}DATA" ]; then
+              echo "DSK=${'$'}(awk -v d="${'$'}DATA" '${'$'}3==d{print ${'$'}4, ${'$'}6, ${'$'}8, ${'$'}10, ${'$'}12, ${'$'}13}' /proc/diskstats 2>/dev/null)"
+              echo "FSTYPE=${'$'}(awk '${'$'}2=="/data"{print ${'$'}3}' /proc/mounts 2>/dev/null)"
+              echo "STATF=${'$'}(stat -f -c '%b %f %S' /data 2>/dev/null)"
+            fi
+            echo "UFSWRITEMB=${'$'}(cat /proc/oplus_storage/io_metrics/forever/ufs_total_write_size_mb 2>/dev/null)"
+            echo "UFSREADMB=${'$'}(cat /proc/oplus_storage/io_metrics/forever/ufs_total_read_size_mb 2>/dev/null)"
+            UFSH=${'$'}(ls /sys/devices/platform/soc/*/health_descriptor/life_time_estimation_a /sys/bus/platform/drivers/ufshcd/*/health_descriptor/life_time_estimation_a 2>/dev/null | head -n 1)
+            [ -z "${'$'}UFSH" ] && UFSH=${'$'}(ls /sys/devices/platform/soc/*/health/life_time_estimation_a 2>/dev/null | head -n 1)
+            if [ -n "${'$'}UFSH" ]; then
+              echo "UFSLIFE=${'$'}(cat "${'$'}UFSH" 2>/dev/null | head -n 1)"
+              echo "UFSEOL=${'$'}(cat "${'$'}{UFSH%/*}/eol_info" 2>/dev/null | head -n 1)"
+              [ -z "${'$'}(cat "${'$'}{UFSH%/*}/eol_info" 2>/dev/null)" ] && echo "UFSEOL=${'$'}(cat "${'$'}{UFSH%/*}/pre_eol_info" 2>/dev/null | head -n 1)"
+            fi
             awk '{ if (${'$'}1 ~ /^(wlan0|rmnet[0-9]+|eth0|dummy0|ccmni[0-9]+|pdp[0-9]+):${'$'}/) { name=${'$'}1; sub(/:${'$'}/,"",name); print "NET_"name"=" ${'$'}2" "${'$'}10; } }' /proc/net/dev 2>/dev/null
             K=/sys/class/kgsl/kgsl-3d0
+            GOK=0
             if [ -d "${'$'}K" ]; then
               [ -r "${'$'}K/gpu_busy_percentage" ] && { read -r g < "${'$'}K/gpu_busy_percentage"; echo "GPUBUSY=${'$'}g"; }
               [ -r "${'$'}K/gpuclk" ] && { read -r g < "${'$'}K/gpuclk"; echo "GPUCLK=${'$'}g"; }
@@ -226,7 +327,45 @@ class SystemMonitor {
               [ -r "${'$'}K/devfreq/governor" ] && { read -r g < "${'$'}K/devfreq/governor"; echo "GPUGOV=${'$'}g"; }
               [ -r "${'$'}K/temp" ] && { read -r g < "${'$'}K/temp"; echo "GPUTEMP=${'$'}g"; }
               [ -r "${'$'}K/gpu_model" ] && { read -r g < "${'$'}K/gpu_model"; echo "GPUMODEL=${'$'}g"; }
+              GOK=1
             fi
+            if [ "${'$'}GOK" = 0 ]; then
+              # 联发科 Dimensity：devfreq/GED 可能冻结，优先 gpufreq_status
+              if [ -r /proc/gpufreqv2/gpufreq_status ]; then
+                GSTAT=${'$'}(cat /proc/gpufreqv2/gpufreq_status 2>/dev/null)
+                GBUSY=${'$'}(printf '%s\n' "${'$'}GSTAT" | awk -F: '/[Uu]til|[Ll]oading/{gsub(/[^0-9.]/,"",${'$'}2); print ${'$'}2; exit}')
+                [ -n "${'$'}GBUSY" ] && echo "GPUBUSY=${'$'}GBUSY"
+                GFRQ=${'$'}(printf '%s\n' "${'$'}GSTAT" | awk -F: '/cur_freq|current_freq/{gsub(/[^0-9]/,"",${'$'}2); print ${'$'}2; exit}')
+                [ -n "${'$'}GFRQ" ] && echo "GPUCLK=${'$'}GFRQ"
+                GMAX=${'$'}(printf '%s\n' "${'$'}GSTAT" | awk -F: '/max_freq/{gsub(/[^0-9]/,"",${'$'}2); print ${'$'}2; exit}')
+                [ -n "${'$'}GMAX" ] && echo "GPUMAX=${'$'}GMAX"
+                GOK=1
+              fi
+            fi
+            if [ "${'$'}GOK" = 0 ] && [ -d /sys/kernel/gpu ]; then
+              [ -r /sys/kernel/gpu/gpu_busy ] && { read -r g < /sys/kernel/gpu/gpu_busy; echo "GPUBUSY=${'$'}g"; }
+              [ -r /sys/kernel/gpu/gpu_clock ] && { read -r g < /sys/kernel/gpu/gpu_clock; echo "GPUCLK=${'$'}g"; }
+              [ -r /sys/kernel/gpu/gpu_model ] && { read -r g < /sys/kernel/gpu/gpu_model; echo "GPUMODEL=${'$'}g"; }
+              GOK=1
+            fi
+            if [ "${'$'}GOK" = 0 ] && [ -d /sys/devices/platform/gpusysfs ]; then
+              [ -r /sys/devices/platform/gpusysfs/gpu_busy ] && { read -r g < /sys/devices/platform/gpusysfs/gpu_busy; echo "GPUBUSY=${'$'}g"; }
+              [ -r /sys/devices/platform/gpusysfs/gpu_clock ] && { read -r g < /sys/devices/platform/gpusysfs/gpu_clock; echo "GPUCLK=${'$'}g"; }
+              GOK=1
+            fi
+            if [ "${'$'}GOK" = 0 ]; then
+              # 通用 Mali / Xclipse devfreq
+              for d in /sys/class/devfreq/*mali* /sys/class/devfreq/*gpu*; do
+                [ -d "${'$'}d" ] || continue
+                [ -r "${'$'}d/cur_freq" ] && { read -r g < "${'$'}d/cur_freq"; echo "GPUCLK=${'$'}g"; }
+                [ -r "${'$'}d/max_freq" ] && { read -r g < "${'$'}d/max_freq"; echo "GPUMAX=${'$'}g"; }
+                [ -r "${'$'}d/min_freq" ] && { read -r g < "${'$'}d/min_freq"; echo "GPUMIN=${'$'}g"; }
+                [ -r "${'$'}d/governor" ] && { read -r g < "${'$'}d/governor"; echo "GPUGOV=${'$'}g"; }
+                GOK=1
+                break
+              done
+            fi
+            [ "${'$'}GOK" = 0 ] && [ -r /sys/module/pvrsrvkm/parameters/sgx_gpu_clk ] && { read -r g < /sys/module/pvrsrvkm/parameters/sgx_gpu_clk; echo "GPUCLK=${'$'}g"; }
             DBG=""
             for d in ${'$'}(awk '${'$'}3=="debugfs"{print ${'$'}2}' /proc/self/mounts 2>/dev/null); do
               [ -f "${'$'}d/sysmon_subsystem_stats/master_cdsp_stats" ] && { DBG="${'$'}d"; break; }
@@ -237,6 +376,7 @@ class SystemMonitor {
               [ -f /sys/kernel/debug/sysmon_subsystem_stats/master_cdsp_stats ] && DBG=/sys/kernel/debug
             fi
             STAT="${'$'}DBG/sysmon_subsystem_stats/master_cdsp_stats"
+            NPUOK=0
             if [ -n "${'$'}DBG" ] && [ -f "${'$'}STAT" ]; then
               awk '
                 /HMX utilization/ { v=${'$'}0; sub(/.*=[ \t]*/,"",v); print "NPU_HMX="v }
@@ -246,6 +386,11 @@ class SystemMonitor {
                 /HMX Power state/ { v=${'$'}0; sub(/.*:[ \t]*/,"",v); print "NPU_PWR="v }
                 /^Count = / { v=${'$'}0; sub(/.*=[ \t]*/,"",v); print "NPU_LPM="v }
               ' "${'$'}STAT"
+              NPUOK=1
+            fi
+            if [ "${'$'}NPUOK" != 1 ] && [ -r /sys/devices/virtual/npu/msm_npu/pwr ]; then
+              echo "NPU_AVAIL=1"
+              echo "NPU_PWR=${'$'}(cat /sys/devices/virtual/npu/msm_npu/pwr 2>/dev/null | head -n 1)"
             fi
         """.trimIndent()
     }

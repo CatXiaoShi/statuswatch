@@ -34,8 +34,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import luolang.status.data.PowerSettings
 import luolang.status.monitor.SystemMonitor
 import luolang.status.ui.cards.CpuCard
+import luolang.status.ui.cards.DiskCard
 import luolang.status.ui.cards.FooterCard
 import luolang.status.ui.cards.GpuCard
 import luolang.status.ui.cards.HeaderCard
@@ -55,6 +57,8 @@ fun DashboardScreen(
     state: SystemMonitor.State,
     intervalMs: Int,
     onIntervalChange: (Int) -> Unit,
+    powerSettings: PowerSettings,
+    onPowerSettingsChange: (PowerSettings) -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
@@ -159,13 +163,27 @@ fun DashboardScreen(
             GpuCard(snapshot = snapshot, history = state.gpuHistory)
 
             Spacer(Modifier.height(12.dp))
-            MemoryCard(mem = snapshot?.mem, history = state.memHistory)
+            MemoryCard(mem = snapshot?.mem, history = state.memHistory, device = state.device)
+
+            Spacer(Modifier.height(12.dp))
+            DiskCard(
+                disk = snapshot?.disk,
+                device = state.device,
+                snapshot = snapshot,
+                readHistory = state.diskReadHistory,
+                writeHistory = state.diskWriteHistory,
+            )
 
             Spacer(Modifier.height(12.dp))
             NpuCard(npu = snapshot?.npu, snapshot = snapshot, history = state.npuHistory)
 
             Spacer(Modifier.height(12.dp))
-            PowerCard(snapshot = snapshot, history = state.powerHistory)
+            PowerCard(
+                snapshot = snapshot,
+                history = state.powerHistory,
+                settings = powerSettings,
+                onSettingsChange = onPowerSettingsChange,
+            )
 
             Spacer(Modifier.height(12.dp))
             FooterCard(snapshot = snapshot)

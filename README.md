@@ -60,16 +60,29 @@
 - 物理内存与 Swap 进度
 - ZRAM 压缩统计（算法 / 原始 / 压缩后 / 物理占用 / 压缩率）
 - SWAP IO 读写量、拓展内存回写块
+- 内存容量、类型（DDR5 等）、颗粒型号与制造商，来源 `/proc/devinfo/ddr`；设备未提供时显示「型号未暴露」
+
+### 存储
+
+- 实时读写速度（MB/s）与双色趋势图
+- IOPS、I/O 繁忙度、队列深度
+- 容量与占用、文件系统类型（f2fs / ext4）
+- UFS 寿命估计、健康状态（正常 / 警告 / 紧急）
+- 累计写入（各分区合计）、本次开机写入、存储温度
+- 点击卡片查看详细页
 
 ### 功耗
 
 - 实时功耗（**充电为正、放电为负**）
 - 充电 / 放电 / 已充满状态识别
+- 手动校准：电流单位（自动 / µA / mA）、反转方向、0.5x - 2.0x 校准系数
 
 ### 其他
 
 - 采样间隔可调：`0.1s / 0.2s / 0.5s / 1.0s / 2.0s / 5.0s`
+- 常驻 Root Shell：`su` 只提权一次，后续采样复用同一 shell，减少进程创建与发热
 - 顶栏「关于」查看版本信息与免责声明
+- 厂商中英对照（如 MICRON → 美光、SK HYNIX → SK 海力士）
 - MIUIX / HyperOS 风格界面，支持浅色与深色
 
 ## 快速开始
@@ -125,9 +138,31 @@ debug 产物：`app/build/outputs/apk/debug/app-debug.apk`
 | SWAP IO | `/proc/vmstat` 的 `pswpin` / `pswpout` |
 | NPU | debugfs `sysmon_subsystem_stats/master_cdsp_stats` |
 | 温度 | `/sys/class/thermal/thermal_zone*/{type,temp}` |
-| 电池 / 功耗 | `/sys/class/power_supply/battery/*` |
+| 电池 / 功耗 | `/sys/class/power_supply/battery/{voltage_now,current_now,status,power_now,temp,capacity}` |
+| 磁盘 I/O | `/proc/diskstats`（扇区 / 完成次数 / io_ticks 差值） |
+| 磁盘容量 / 文件系统 | `/proc/mounts`、`stat -f /data` |
+| 磁盘型号 / 厂商 | `/sys/block/sd*/device/{model,vendor}`，回退 `/proc/devinfo/ufs`、`/proc/scsi/scsi` |
+| UFS 寿命 / 健康 | `/sys/devices/platform/soc/*/health_descriptor/{life_time_estimation_a,eol_info}` |
+| 累计写入（合计） | 汇总所有 `/sys/fs/{f2fs,ext4}/*/lifetime_write_kbytes`（排除 loop 设备） |
+| 本次开机写入 | `/proc/oplus_storage/io_metrics/forever/ufs_total_write_size_mb`（部分厂商） |
+| 内存型号 / 厂商 | `/proc/devinfo/ddr`（类型 / 厂商 / Die / 容量），回退 `/proc/hwinfo`、`dmesg`、`ro.boot.ddr_*` |
 | 网速 | `/proc/net/dev` 差值 |
 | 开机时间 | `/proc/uptime` |
+
+### 跨品牌探测顺序
+
+按「厂商专有节点 → 标准接口 → 内核日志」短路探测，命中即停：
+
+| 模块 | 探测顺序 |
+|---|---|
+| CPU 温度 | `thermal_zone` 匹配 `cpu` / `cpuss` / `soc` / `tsens` / `tj`，跳过 0 与 -273 |
+| GPU | 高通 kgsl → MTK `/proc/gpufreqv2/gpufreq_status` → `/sys/kernel/gpu` → 三星 `gpusysfs` → Mali/Xclipse devfreq → PowerVR |
+| NPU | 高通 debugfs `master_cdsp_stats` → `/sys/devices/virtual/npu/msm_npu/pwr`；MTK / 三星无公开统一端点，显示不支持 |
+| RAM 颗粒 | `/proc/devinfo/ddr` → `/proc/hwinfo` → `dmesg` → `ro.boot.ddr_*` |
+| ROM 颗粒 | `/sys/block/sd*/device/*` → `/proc/devinfo/ufs` → `/proc/scsi/scsi` → `/proc/hwinfo` → `dmesg` |
+| ROM 健康 | `ufshcd/*/health_descriptor/life_time_estimation_a`（通配）→ `eol_info` / `pre_eol_info` |
+
+任何节点缺失或无权限时静默降级，界面显示「—」，不阻塞采样。
 
 ## 项目结构
 

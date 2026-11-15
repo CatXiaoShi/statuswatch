@@ -1,6 +1,7 @@
 package luolang.status.ui.cards
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,13 +17,19 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import luolang.status.data.PowerSettings
 import luolang.status.data.Snapshot
+import luolang.status.ui.PowerSettingsDialog
 import luolang.status.ui.components.Sparkline
 import java.util.Locale
 
@@ -30,7 +37,13 @@ private val ChargingGreen = Color(0xFF43A047)
 private val DischargingOrange = Color(0xFFFF8A00)
 
 @Composable
-fun PowerCard(snapshot: Snapshot?, history: List<Float>) {
+fun PowerCard(
+    snapshot: Snapshot?,
+    history: List<Float>,
+    settings: PowerSettings,
+    onSettingsChange: (PowerSettings) -> Unit,
+) {
+    var showSettings by remember { mutableStateOf(false) }
     val battery = snapshot?.battery
     val powerW = battery?.powerW ?: 0.0
     val charging = battery?.charging == true || powerW > 0.0
@@ -83,7 +96,6 @@ fun PowerCard(snapshot: Snapshot?, history: List<Float>) {
             Spacer(Modifier.height(6.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
@@ -99,8 +111,37 @@ fun PowerCard(snapshot: Snapshot?, history: List<Float>) {
                     )
                 }
                 Spacer(Modifier.size(8.dp))
-                
+                Text(
+                    text = "充电为正 · 放电为负",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .clickable { showSettings = true }
+                        .padding(horizontal = 12.dp, vertical = 5.dp),
+                ) {
+                    Text(
+                        text = "校准",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
         }
+    }
+
+    if (showSettings) {
+        PowerSettingsDialog(
+            current = settings,
+            onDismiss = { showSettings = false },
+            onConfirm = {
+                onSettingsChange(it)
+                showSettings = false
+            },
+        )
     }
 }
